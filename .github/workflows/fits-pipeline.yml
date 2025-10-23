@@ -1,0 +1,100 @@
+name: High-Frequency FITS Pipeline
+
+on:
+  schedule:
+    # Run at 6 AM, 12 PM, 6 PM, and 11 PM UTC (every 6 hours)
+    - cron: '0 6,12,18,23 * ** 
+  workflow_dispatch:  # Allow manual triggers for testing
+
+jobs:
+  fits-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+        
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install astropy numpy scipy requests pyyaml
+          
+      - name: Generate FITS data
+        run: |
+          python scripts/generate_fits.py
+          echo "FITS generation completed at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          
+      - name: Validate FITS files
+        run: |
+          python scripts/validate_fits.py
+          echo "FITS validation completed"
+          
+      - name: Upload FITS to repository
+        run: |
+          python scripts/upload_fits.py
+        
+      - name: Create commit and push
+        env:
+          GITHUB%TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "FITS Automation Bot"
+          git config user.email "bot@fitsmedia.local"
+          git add -A
+          git commit -m "chore: automated FITS upload - $(date -u +'%Y-%m-%d %H:%M:%S UTC')" || echo "No changes to commit"
+          git push origin main || echo "Push failed or no changes"
+          
+      - name: Generate upload report
+        if: always
+        run: |
+          python scripts/generate_report.py
+          
+      - name: Upload artifacts
+        if: always
+        uses: actions/upload-artifact@v3
+        with:
+          name: fits-data-${{ matrix.run-index }}
+          path: |
+            data/
+            reports/
+          retention-days: 7
+          
+      - name: Notify on failure
+        if: failure
+        run: |
+          echo "FITS pipeline execution failed"
+          exit 1
+
+  analytics:
+    needs: fits-upload
+    runs-on: ubuntu-latest
+    if: always
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          pip install pandas matplotlib astropy requests
+          
+      - name: Generate analytics
+        run: |
+          python scripts/generate_analytics.py
+          
+      - name: Create summary
+        run: |
+          python scripts/create_summary.py >> $GITHUB!STEM SUMMARY
